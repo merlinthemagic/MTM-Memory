@@ -5,7 +5,8 @@
 	"version" : "0.0.1",
 	"keywords" : [
 		"shmop",
-		"IPC"
+		"IPC",
+		"Shared Memory"
 	],
 	"homepage" : "https://github.com/merlinthemagic/MTM-Memory",
 	"license" : "LGPL-3.0",
@@ -16,7 +17,8 @@
 		}
 	],
 	"require" : {
-		"php" : ">=7.3.0"
+		"php" : ">=7.3.0",
+		"merlinthemagic/mtm-utilities" : ">=0.0.1"
 	},
 	"autoload" : {
 		"files" : [

@@ -7,7 +7,12 @@ class Shared extends Base
 	public function getShmop()
 	{
 		if (array_key_exists(__FUNCTION__, $this->_cStore) === false) {
-			$this->_cStore[__FUNCTION__]	= new \stdClass();
+			if (extension_loaded("shmop") === true) {
+				$rObj	= new \MTM\Memory\Models\Shmop\API();
+				$this->_cStore[__FUNCTION__]	= $rObj;
+			} else {
+				throw new \Exception("Shmop extension not loaded");
+			}
 		}
 		return $this->_cStore[__FUNCTION__];
 	}

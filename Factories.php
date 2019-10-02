@@ -6,7 +6,7 @@ class Factories
 {
 	private static $_cStore=array();
 	
-	//USE: $aFact		= \MTM\Memory\Factories::$METHOD_NAME();
+	//USE: $aFact		= \MTM\Memory\Factories::__METHOD__();
 	
 	public static function getShared()
 	{
