@@ -1,0 +1,27 @@
+{
+	"name" : "merlinthemagic/mtm-memory",
+	"type" : "library",
+	"description" : "Shared Memory tools for PHP 7",
+	"version" : "0.0.1",
+	"keywords" : [
+		"shmop",
+		"IPC"
+	],
+	"homepage" : "https://github.com/merlinthemagic/MTM-Memory",
+	"license" : "LGPL-3.0",
+	"authors" : [{
+			"name" : "Martin Peter Madsen",
+			"email" : "dev@martinpetermadsen.com",
+			"role" : "Developer"
+		}
+	],
+	"require" : {
+		"php" : ">=7.3.0"
+	},
+	"autoload" : {
+		"files" : [
+			"./Enable.php"
+		]
+	},
+	"minimum-stability" : "dev"
+}
