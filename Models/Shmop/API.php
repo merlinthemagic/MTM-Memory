@@ -10,7 +10,6 @@ class API
 	
 	public function getNewShare($name=null, $size=null, $perm=null)
 	{
-		$name	= "4AFC5705-DFD0-21CA-96CA-F15688404EAC";
 		if ($name === null) {
 			$name	= \MTM\Utilities\Factories::getGuids()->getV4()->get(false);
 		} else {
@@ -20,7 +19,8 @@ class API
 		$shObj	= $this->getShareByName($name, false);
 		if ($shObj === null) {
 			
-			$segId	= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name);
+			//there seems to be a 32bit limit on addresses
+			$segId	= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
 			if ($this->getMaxId() > $segId) {
 				$segId	= $this->getMaxId() % $segId;
 			} else {

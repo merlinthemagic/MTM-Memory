@@ -18,7 +18,7 @@
 	],
 	"require" : {
 		"php" : ">=7.3.0",
-		"merlinthemagic/mtm-utilities" : ">=0.0.2"
+		"merlinthemagic/mtm-utilities" : ">=0.0.3"
 	},
 	"autoload" : {
 		"files" : [
