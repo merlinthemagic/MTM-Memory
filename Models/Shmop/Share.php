@@ -129,10 +129,7 @@ class Share extends Base
 	}
 	public function getAttachCount()
 	{
-		//how many processes are attached to the share?
-		$strCmd	= "ipcs -m | grep \"" . dechex($this->getSegmentId()) . "\" | awk '{print \$NF} END { if (!NR) print 0 }'";
-		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
-		return intval($rObj->data);
+		return $this->getParent()->getShareAttachCount($this);
 	}
 	protected function getShmData($id)
 	{
@@ -227,6 +224,7 @@ class Share extends Base
 					} else {
 						//someone else has the lock, they will be setting up the structure
 						//and release the lock when ready.
+						//we deadlock if we wait for the lock for unknown reasons
 					}
 					$this->_initTime	= \MTM\Utilities\Factories::getTime()->getMicroEpoch();
 					$this->_isInit		= true;

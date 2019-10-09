@@ -19,7 +19,8 @@ class API
 		$shObj	= $this->getShareByName($name, false);
 		if ($shObj === null) {
 			
-			//there seems to be a 32bit limit on addresses
+			//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
+			//attached count, because the max id can be 64bit/2  
 			$segId	= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
 			if ($this->getMaxId() > $segId) {
 				$segId	= $this->getMaxId() % $segId;
@@ -66,6 +67,13 @@ class API
 		} else {
 			return null;
 		}
+	}
+	public function getShareAttachCount($shareObj)
+	{
+		//how many processes are attached to the share?
+		$strCmd	= "ipcs -m | grep \"" . dechex($shareObj->getSegmentId()) . "\" | awk '{print \$NF} END { if (!NR) print 0 }'";
+		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
+		return intval($rObj->data);
 	}
 	public function getMaxId()
 	{
