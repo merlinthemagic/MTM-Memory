@@ -9,15 +9,12 @@ class Share extends Base
 	protected $_isTerm=false;
 	protected $_initTime=null;
 	protected $_name=null;
-	protected $_keepAlive=false;
+	protected $_keepAlive=true;
 	protected $_segId=null;
 	protected $_size=10000;
 	protected $_perm="0644";
 	protected $_rwShm=null;
-	protected $_rwLock=false;
-	protected $_rwLockStack=0;
 	protected $_rwSem=null;
-	protected $_attachLock=false;
 	protected $_attachSem=null;
 	
 	public function __construct($segId=null)
@@ -31,7 +28,7 @@ class Share extends Base
 	}
 	public function add($key, $value)
 	{
-		$this->rwLock();
+		$this->getRwSem()->lock();
 		try {
 
 			if ($this->getExists($key) === false) {
@@ -47,8 +44,8 @@ class Share extends Base
 				//update id counter
 				$this->setShmData(900, $uId);
 				
-				$this->rwUnlock();
-				
+				$this->getRwSem()->unlock();
+
 				return $this;
 				
 			} else {
@@ -56,7 +53,7 @@ class Share extends Base
 			}
 		
 		} catch (\Exception $e) {
-			$this->rwUnlock();
+			$this->getRwSem()->unlock();
 			throw $e;
 		}
 	}
@@ -70,19 +67,19 @@ class Share extends Base
 	}
 	public function get($key)
 	{
-		$this->rwLock();
+		$this->getRwSem()->lock();
 		try {
 			$data = $this->getShmData($this->getKeyId($key));
-			$this->rwUnlock();
+			$this->getRwSem()->unlock();
 			return $data;
 		} catch (\Exception $e) {
-			$this->rwUnlock();
+			$this->getRwSem()->unlock();
 			throw $e;
 		}
 	}
 	public function set($key, $value)
 	{
-		$this->rwLock();
+		$this->getRwSem()->lock();
 		try {
 			
 			$keyId	= $this->getKeyId($key, false);
@@ -91,16 +88,17 @@ class Share extends Base
 			} else {
 				$this->setShmData($keyId, $value);
 			}
+			$this->getRwSem()->unlock();
 			return $this;
 		
 		} catch (\Exception $e) {
-			$this->rwUnlock();
+			$this->getRwSem()->unlock();
 			throw $e;
 		}
 	}
 	public function remove($key)
 	{
-		$this->rwLock();
+		$this->getRwSem()->lock();
 		try {
 			
 			$keyId	= $this->getKeyId($key, false);
@@ -116,6 +114,7 @@ class Share extends Base
 				unset($maps[$key]);
 				$this->setShmData(514, $maps);
 
+				$this->getRwSem()->unlock();
 				return $this;
 				
 			} else {
@@ -123,7 +122,7 @@ class Share extends Base
 			}
 			
 		} catch (\Exception $e) {
-			$this->rwUnlock();
+			$this->getRwSem()->unlock();
 			throw $e;
 		}
 	}
@@ -133,34 +132,61 @@ class Share extends Base
 	}
 	protected function getShmData($id)
 	{
-		$this->rwLock();
+		$this->getRwSem()->lock();
 		try {
 			
 			$data	= shm_get_var($this->getRwShm(), $id);
-			$this->rwUnlock();
+			$this->getRwSem()->unlock();
 			return $data;
 		
 		} catch (\Exception $e) {
-			$this->rwUnlock();
+			$this->getRwSem()->unlock();
 			throw $e;
 		}
 	}
 	protected function setShmData($id, $value)
 	{
-		$this->rwLock();
+		$this->getRwSem()->lock();
 		try {
-			$isValid	= shm_put_var($this->getRwShm(), $id, $value);
 			
+			$isValid	= shm_put_var($this->getRwShm(), $id, $value);
 			if ($isValid === true) {
-				$this->rwUnlock();
+				$this->getRwSem()->unlock();
 				return $this;
 			} else {
 				throw new \Exception("Failed to set id: " . $id);
 			}
 		} catch (\Exception $e) {
-			$this->rwUnlock();
+			$this->getRwSem()->unlock();
 			throw $e;
 		}
+	}
+	protected function getMaps()
+	{
+		return $this->getShmData(514);
+	}
+	protected function getKeyId($key, $throw=true)
+	{
+		$maps	= $this->getMaps();
+		if (array_key_exists($key, $maps) === true) {
+			return $maps[$key];
+		} elseif ($throw === true) {
+			throw new \Exception("Key does not exist: " . $key);
+		} else {
+			return null;
+		}
+	}
+	protected function getAttachSem()
+	{
+		return $this->_attachSem;
+	}
+	protected function getRwSem()
+	{
+		return $this->_rwSem;
+	}
+	protected function getRwShm()
+	{
+		return $this->_rwShm;
 	}
 	public function initialize()
 	{
@@ -168,32 +194,23 @@ class Share extends Base
 
 			if ($this->getSegmentId() !== null) {
 				
-				$attachSem	= sem_get($this->getSegmentId() + 1, 1, intval($this->getPermission(), 8), 1);
-				if (is_resource($attachSem) === true) {
-					$this->_attachSem		= $attachSem;
-				} else {
-					throw new \Exception("Failed to get to attach semaphore");
-				}
+				$semFact			= \MTM\Memory\Factories::getShared()->getSemaphore();
+				$this->_attachSem	= $semFact->getNewSemaphore($this->getName() . "-Attach", 1, $this->getPermission());
+				$this->_attachSem->setKeepAlive(true);
+				$this->getAttachSem()->lock();
 				
-				$this->attachLock();
 				try {
-				
-					$rwSem	= sem_get($this->getSegmentId() + 2, 1, intval($this->getPermission(), 8), 1);
-					if (is_resource($rwSem) === true) {
-						$this->_rwSem		= $rwSem;
-					} else {
-						throw new \Exception("Failed to get to read/write semaphore");
-					}
-					
-					$rwShm	= shm_attach($this->getSegmentId(), $this->getSize(),intval($this->getPermission(), 8));
+
+					$this->_rwSem	= $semFact->getNewSemaphore($this->getName() . "-RW", 1, $this->getPermission());
+					$this->_rwSem->setKeepAlive(true);
+					$rwShm			= shm_attach($this->getSegmentId(), $this->getSize(),intval($this->getPermission(), 8));
 					if (is_resource($rwShm) === true) {
 						$this->_rwShm		= $rwShm;
 					} else {
 						throw new \Exception("Failed to attach to shared segment");
 					}
-					
-					$hasLock	= $this->rwLock(true);
-					if ($hasLock === true) {
+
+					if ($this->getRwSem()->lock(true) === true) {
 						
 						try {
 
@@ -215,10 +232,10 @@ class Share extends Base
 									
 								}
 							}
-							$this->rwUnlock();
+							$this->getRwSem()->unlock();
 
 						} catch (\Exception $e) {
-							$this->rwUnlock();
+							$this->getRwSem()->unlock();
 							throw $e;
 						}
 					} else {
@@ -229,10 +246,10 @@ class Share extends Base
 					$this->_initTime	= \MTM\Utilities\Factories::getTime()->getMicroEpoch();
 					$this->_isInit		= true;
 					
-					$this->attachUnlock();
-				
+					$this->getAttachSem()->unlock();
+					
 				} catch (\Exception $e) {
-					$this->attachUnlock();
+					$this->getAttachSem()->unlock();
 					throw $e;
 				}
 				
@@ -249,31 +266,32 @@ class Share extends Base
 
 			if ($this->_isInit === true) {
 				
-				$this->rwUnlock();
-				$this->attachUnlock();
+				$this->getRwSem()->unlock(true);
+				$this->getAttachSem()->unlock(true);
 				
 				if ($this->getKeepAlive() === false) {
 					//if we are the last process attached to the segment we clean up
-					$this->attachLock();
+					$this->getAttachSem()->lock();
 					try {
 						
 						if ($this->getAttachCount() === 1) {
 							shm_remove($this->getRwShm());
-							sem_remove($this->getRwSem());
-							sem_remove($this->getAttachSem());
-							$this->_attachLock	= false; //on account of deleted
+							
+							//remove the semaphores
+							$this->getRwSem()->setKeepAlive(false)->terminate();
+							$this->getAttachSem()->setKeepAlive(false)->terminate();
+							
 						} else {
-							$this->attachUnlock();
+							$this->getAttachSem()->unlock();
 						}
-	
+
 					} catch (\Exception $e) {
-						$this->attachUnlock();
+						$this->getAttachSem()->unlock();
 						//dont throw, may be shutting down
 					}
 				}
 				shm_detach($this->getRwShm());
 				$this->_rwShm	= null;
-				
 			}
 			
 			$this->getParent()->removeShare($this);
@@ -321,95 +339,12 @@ class Share extends Base
 	}
 	public function setKeepAlive($bool)
 	{
-		//remove the resource on terminate if we are the last
-		//connected
+		//remove the share on terminate if we are the last connection
 		$this->_keepAlive	= $bool;
 		return $this;
 	}
 	public function getKeepAlive()
 	{
 		return $this->_keepAlive;
-	}
-	protected function getMaps()
-	{
-		return $this->getShmData(514);
-	}
-	protected function getKeyId($key, $throw=true)
-	{
-		$maps	= $this->getMaps();
-		if (array_key_exists($key, $maps) === true) {
-			return $maps[$key];
-		} elseif ($throw === true) {
-			throw new \Exception("Key does not exist: " . $key);
-		} else {
-			return null;
-		}
-	}
-	protected function rwLock($noWait=false)
-	{
-		if ($this->_rwLock === false) {
-			$this->_rwLock	= @sem_acquire($this->getRwSem(), $noWait);
-			if ($noWait === false && $this->_rwLock === false) {
-				throw new \Exception("Failed to get read/write lock");
-			}
-		}
-		if ($this->_rwLock === true) {
-			$this->_rwLockStack++;
-		}
-		return $this->_rwLock;
-	}
-	protected function rwUnlock($purgeStack=false)
-	{
-		if ($this->_rwLock === true) {
-			if ($purgeStack === false) {
-				$this->_rwLockStack--;
-			} else {
-				$this->_rwLockStack = 0;
-			}
-			if ($this->_rwLockStack === 0) {
-				$isValid	= sem_release($this->getRwSem());
-				if ($isValid === true) {
-					$this->_rwLock	= false;
-				} else {
-					throw new \Exception("Failed to relase RW semaphore");
-				}
-			}
-		}
-		return $this;
-	}
-	protected function attachLock($noWait=false)
-	{
-		if ($this->_attachLock === false) {
-			$this->_attachLock	= @sem_acquire($this->getAttachSem(), $noWait);
-			if ($noWait === false && $this->_attachLock === false) {
-				//happens if the semaphore is deleted
-				throw new \Exception("Failed to get attach lock");
-			}
-		}
-		return $this->_attachLock;
-	}
-	protected function attachUnlock()
-	{
-		if ($this->_attachLock === true) {
-			$isValid	= sem_release($this->getAttachSem());
-			if ($isValid === true) {
-				$this->_attachLock	= false;
-			} else {
-				throw new \Exception("Failed to relase Attach semaphore");
-			}
-		}
-		return $this;
-	}
-	protected function getRwShm()
-	{
-		return $this->_rwShm;
-	}
-	protected function getAttachSem()
-	{
-		return $this->_attachSem;
-	}
-	protected function getRwSem()
-	{
-		return $this->_rwSem;
 	}
 }

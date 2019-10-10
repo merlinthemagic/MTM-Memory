@@ -16,4 +16,16 @@ class Shared extends Base
 		}
 		return $this->_cStore[__FUNCTION__];
 	}
+	public function getSemaphore()
+	{
+		if (array_key_exists(__FUNCTION__, $this->_cStore) === false) {
+			if (extension_loaded("sysvsem") === true) {
+				$rObj	= new \MTM\Memory\Models\Semaphore\API();
+				$this->_cStore[__FUNCTION__]	= $rObj;
+			} else {
+				throw new \Exception("sysvsem extension not loaded");
+			}
+		}
+		return $this->_cStore[__FUNCTION__];
+	}
 }

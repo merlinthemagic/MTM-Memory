@@ -4,9 +4,8 @@ namespace MTM\Memory\Models\Shmop;
 
 class API
 {
-	protected $_strMaxId=null;
-	protected $_maxId=null;
 	protected $_shObjs=array();
+	protected $_keepAlive=true;
 	
 	public function getNewShare($name=null, $size=null, $perm=null)
 	{
@@ -21,16 +20,10 @@ class API
 			
 			//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
 			//attached count, because the max id can be 64bit/2  
-			$segId	= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
-			if ($this->getMaxId() > $segId) {
-				$segId	= $this->getMaxId() % $segId;
-			} else {
-				$segId	= $segId % $this->getMaxId();
-			}
-
+			$segId		= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
 			$rObj		= new \MTM\Memory\Models\Shmop\Share($segId);
-			$rObj->setParent($this)->setName($name);
-			
+			$rObj->setParent($this)->setName($name)->setKeepAlive($this->getDefaultKeepAlive());
+
 			if ($size !== null) {
 				$rObj->setSize($size);
 			}
@@ -47,6 +40,16 @@ class API
 		} else {
 			throw new \Exception("Cannot add share exists with name: " . $name);
 		}
+	}
+	public function setDefaultKeepAlive($bool)
+	{
+		//should shares delete once terminated if there are no other connections
+		$this->_keepAlive	= $bool;
+		return $this;
+	}
+	public function getDefaultKeepAlive()
+	{
+		return $this->_keepAlive;
 	}
 	public function removeShare($shareObj)
 	{
@@ -75,24 +78,19 @@ class API
 		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
 		return intval($rObj->data);
 	}
-	public function getMaxId()
+	public function clearSystem()
 	{
-		if ($this->_maxId === null) {
-			$this->_maxId	= intval($this->getMaxIdAsString());
-		}
-		return $this->_maxId;
-	}
-	public function getMaxIdAsString()
-	{
-		if ($this->_strMaxId === null) {
-			//cant specify unsigned int in PHP, the max will only be half the address space if cast to int
-			exec("sysctl kernel.shmmax -n", $rData);
-			if (count($rData) == 1 && ctype_digit($rData[0]) === true) {
-				$this->_strMaxId	= $rData[0];
-			} else {
-				throw new \Exception("Failed to get shmax");
+		//remove all shares owned by this user on the system
+		$strCmd	= "ipcs -m | grep \$(whoami); echo \" \"";
+		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
+		$lines	= explode("\n", trim($rObj->data));
+		foreach ($lines as $line) {
+			$id		= substr($line, 0, strpos($line, " "));
+			$shmRes	= @shm_attach(hexdec($id));
+			if (is_resource($shmRes) === true) {
+				@shm_remove($shmRes);
 			}
 		}
-		return $this->_strMaxId;
+		return $this;
 	}
 }
