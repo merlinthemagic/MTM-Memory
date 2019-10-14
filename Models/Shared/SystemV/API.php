@@ -1,6 +1,6 @@
 <?php
 //© 2019 Martin Peter Madsen
-namespace MTM\Memory\Models\Shmop;
+namespace MTM\Memory\Models\Shared\SystemV;
 
 class API
 {
@@ -21,13 +21,14 @@ class API
 			//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
 			//attached count, because the max id can be 64bit/2  
 			$segId		= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
-			$rObj		= new \MTM\Memory\Models\Shmop\Share($segId);
+			$rObj		= new \MTM\Memory\Models\Shared\SystemV\Share($segId);
 			$rObj->setParent($this)->setName($name)->setKeepAlive($this->getDefaultKeepAlive());
 
 			if ($size !== null) {
 				$rObj->setSize($size);
 			}
 			if ($perm !== null) {
+				$perm	= str_repeat("0", 4 - strlen($perm)) . $perm;
 				$rObj->setPermission($perm);
 			}
 

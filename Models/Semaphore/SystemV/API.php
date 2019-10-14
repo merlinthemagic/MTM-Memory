@@ -1,6 +1,6 @@
 <?php
 //© 2019 Martin Peter Madsen
-namespace MTM\Memory\Models\Semaphore;
+namespace MTM\Memory\Models\Semaphore\SystemV;
 
 class API
 {
@@ -21,13 +21,14 @@ class API
 			//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
 			//attached count, because the max id can be 64bit/2
 			$id		= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
-			$rObj	= new \MTM\Memory\Models\Semaphore\Semaphore($id);
+			$rObj	= new \MTM\Memory\Models\Semaphore\SystemV\Semaphore($id);
 			$rObj->setParent($this)->setName($name)->setKeepAlive($this->getDefaultKeepAlive());
 			
 			if ($count !== null) {
 				$rObj->setCount($count);
 			}
 			if ($perm !== null) {
+				$perm	= str_repeat("0", 4 - strlen($perm)) . $perm;
 				$rObj->setPermission($perm);
 			}
 

@@ -1,6 +1,6 @@
 <?php
 //© 2019 Martin Peter Madsen
-namespace MTM\Memory\Models\Semaphore;
+namespace MTM\Memory\Models\Shared\SystemV;
 
 class Base
 {

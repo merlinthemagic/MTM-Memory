@@ -1,6 +1,6 @@
 <?php
 //© 2019 Martin Peter Madsen
-namespace MTM\Memory\Models\Shmop;
+namespace MTM\Memory\Models\Semaphore\SystemV;
 
 class Base
 {

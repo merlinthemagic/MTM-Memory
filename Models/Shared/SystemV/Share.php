@@ -1,6 +1,6 @@
 <?php
 //© 2019 Martin Peter Madsen
-namespace MTM\Memory\Models\Shmop;
+namespace MTM\Memory\Models\Shared\SystemV;
 
 class Share extends Base
 {
@@ -194,7 +194,7 @@ class Share extends Base
 
 			if ($this->getSegmentId() !== null) {
 				
-				$semFact			= \MTM\Memory\Factories::getShared()->getSemaphore();
+				$semFact			= \MTM\Memory\Factories::getSemaphores()->getSystemFive();
 				$this->_attachSem	= $semFact->getNewSemaphore($this->getName() . "-Attach", 1, $this->getPermission());
 				$this->_attachSem->setKeepAlive(true);
 				$this->getAttachSem()->lock();
