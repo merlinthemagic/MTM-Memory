@@ -7,7 +7,7 @@ class API
 	protected $_shObjs=array();
 	protected $_keepAlive=true;
 	
-	public function getNewShare($name=null, $size=null, $perm=null)
+	public function getShare($name=null, $size=null, $perm=null)
 	{
 		if ($name === null) {
 			$name	= \MTM\Utilities\Factories::getGuids()->getV4()->get(false);
@@ -18,29 +18,26 @@ class API
 		$shObj	= $this->getShareByName($name, false);
 		if ($shObj === null) {
 			
-			//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
-			//attached count, because the max id can be 64bit/2  
-			$segId		= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
-			$rObj		= new \MTM\Memory\Models\Shared\SystemV\Share($segId);
-			$rObj->setParent($this)->setName($name)->setKeepAlive($this->getDefaultKeepAlive());
+			$segId		= $this->getSegmentIdFromName($name);
+			$shObj		= new \MTM\Memory\Models\Shared\SystemV\Share($segId);
+			$shObj->setParent($this)->setName($name)->setKeepAlive($this->getDefaultKeepAlive());
 
 			if ($size !== null) {
-				$rObj->setSize($size);
+				//make check if size does not match
+				$shObj->setSize($size);
 			}
 			if ($perm !== null) {
+				//make check if permissions do not match
 				$perm	= str_repeat("0", 4 - strlen($perm)) . $perm;
-				$rObj->setPermission($perm);
+				$shObj->setPermission($perm);
 			}
 
-			$rObj->initialize();
+			$shObj->initialize();
 			$hash					= hash("sha256", $name);
-			$this->_shObjs[$hash]	= $rObj;
+			$this->_shObjs[$hash]	= $shObj;
 
-			return $rObj;
-			
-		} else {
-			throw new \Exception("Cannot add share exists with name: " . $name);
 		}
+		return $shObj;
 	}
 	public function setDefaultKeepAlive($bool)
 	{
@@ -72,6 +69,18 @@ class API
 			return null;
 		}
 	}
+	public function getShareExistByName($name)
+	{
+		//does the share exist?
+		$segId	= $this->getSegmentIdFromName($name);
+		$strCmd	= "ipcs -m | grep \"" . dechex($segId) . "\" | awk '{print \$NF} END { if (!NR) print -1 }'";
+		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
+		if (intval($rObj->data) < 0) {
+			return false;
+		} else {
+			return true;
+		}
+	}
 	public function getShareAttachCount($shareObj)
 	{
 		//how many processes are attached to the share?
@@ -93,5 +102,18 @@ class API
 			}
 		}
 		return $this;
+		
+// 			#!/bin/sh
+// 			for i in $(ipcs -m | awk '{ print $2 }' | sed 1,2d);
+// 			do
+// 				echo "ipcrm -m $i"
+// 				ipcrm -m $i
+// 			done
+	}
+	protected function getSegmentIdFromName($name)
+	{
+		//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
+		//attached count, because the max id can be 64bit/2 
+		return \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
 	}
 }

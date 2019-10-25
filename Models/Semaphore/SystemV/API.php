@@ -20,8 +20,8 @@ class API
 			
 			//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
 			//attached count, because the max id can be 64bit/2
-			$id		= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
-			$rObj	= new \MTM\Memory\Models\Semaphore\SystemV\Semaphore($id);
+			$segId		= $this->getSegmentIdFromName($name);
+			$rObj		= new \MTM\Memory\Models\Semaphore\SystemV\Semaphore($segId);
 			$rObj->setParent($this)->setName($name)->setKeepAlive($this->getDefaultKeepAlive());
 			
 			if ($count !== null) {
@@ -62,6 +62,18 @@ class API
 			return null;
 		}
 	}
+	public function getExistByName($name)
+	{
+		//does the semaphore exist?
+		$segId	= $this->getSegmentIdFromName($name);
+		$strCmd	= "ipcs -s | grep \"" . dechex($segId) . "\" | awk '{print \$NF} END { if (!NR) print -1 }'";
+		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
+		if (intval($rObj->data) < 0) {
+			return false;
+		} else {
+			return true;
+		}
+	}
 	public function setDefaultKeepAlive($bool)
 	{
 		//should new semaphores delete once terminated
@@ -86,5 +98,18 @@ class API
 			}
 		}
 		return $this;
+		
+// 		#!/bin/sh
+// 		for i in $(ipcs -s | awk '{ print $2 }' | sed 1,2d);
+// 		do
+// 			echo "ipcrm -s $i"
+// 			ipcrm -s $i
+// 		done
+	}
+	protected function getSegmentIdFromName($name)
+	{
+		//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
+		//attached count, because the max id can be 64bit/2
+		return \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
 	}
 }

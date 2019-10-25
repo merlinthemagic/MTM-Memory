@@ -6,7 +6,7 @@ class Factories
 {
 	private static $_cStore=array();
 	
-	//USE: $aFact		= \MTM\Memory\Factories::getSemaphores();
+	//USE: $aFact		= \MTM\Memory\Factories::$METHOD();
 	
 	public static function getShared()
 	{

@@ -88,7 +88,9 @@ class Semaphore extends Base
 			if ($this->_isInit === true) {
 				$this->unlock(true);
 				if ($this->getKeepAlive() === false) {
-					sem_remove($this->getRes());
+					if ($this->getParent()->getExistByName($this->getName()) === true) {
+						sem_remove($this->getRes());
+					}
 				}
 				$this->_semRes	= null;
 			}

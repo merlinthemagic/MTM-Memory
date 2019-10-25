@@ -16,6 +16,7 @@ class Share extends Base
 	protected $_rwShm=null;
 	protected $_rwSem=null;
 	protected $_attachSem=null;
+	protected $_sysKeys=array("isInit", "maps", "mapId"); //mappings used by the system, maybe use int?
 	
 	public function __construct($segId=null)
 	{
@@ -32,21 +33,25 @@ class Share extends Base
 		try {
 
 			if ($this->getExists($key) === false) {
-				
-				$uId		= $this->getShmData(900);
-				$this->setShmData($uId, $value); //set new variable
-				
-				//update maps
-				$maps		= $this->getMaps();
-				$maps[$key]	= $uId++;
-				$this->setShmData(514, $maps);
-				
-				//update id counter
-				$this->setShmData(900, $uId);
-				
-				$this->getRwSem()->unlock();
-
-				return $this;
+				if (in_array($key, $this->_sysKeys) === false) {
+					$uId		= $this->getShmData(900);
+					$this->setShmData($uId, $value); //set new variable
+					
+					//update maps
+					$maps		= $this->getMaps();
+					$maps[$key]	= $uId++;
+					$this->setShmData(514, $maps);
+					
+					//update id counter
+					$this->setShmData(900, $uId);
+					
+					$this->getRwSem()->unlock();
+	
+					return $this;
+					
+				} else {
+					throw new \Exception("Invalid Key name. Key is used by system: " . $key);
+				}
 				
 			} else {
 				throw new \Exception("Failed to add key exists: " . $key);
@@ -79,18 +84,52 @@ class Share extends Base
 	}
 	public function set($key, $value)
 	{
+		if (in_array($key, $this->_sysKeys) === false) {
+			
+			$this->getRwSem()->lock();
+			try {
+				
+				$keyId	= $this->getKeyId($key, false);
+				if ($keyId === null) {
+					$this->add($key, $value);
+				} else {
+					$this->setShmData($keyId, $value);
+				}
+				$this->getRwSem()->unlock();
+				return $this;
+			
+			} catch (\Exception $e) {
+				$this->getRwSem()->unlock();
+				throw $e;
+			}
+		} else {
+			throw new \Exception("Cannot set. Key is used by system: " . $key);
+		}
+	}
+	public function clear()
+	{
 		$this->getRwSem()->lock();
 		try {
 			
-			$keyId	= $this->getKeyId($key, false);
-			if ($keyId === null) {
-				$this->add($key, $value);
-			} else {
-				$this->setShmData($keyId, $value);
+			$maps	= $this->getMaps();
+			foreach ($maps as $key => $id) {
+				if ($id >= 1500) {
+					$this->remove($key);
+				}
 			}
+			//clear all data from share
+			$maps	= array(
+					"isInit"	=> 512,
+					"maps"		=> 514,
+					"mapId"		=> 900
+			);
+			$this->setShmData(514, $maps);
+			$this->setShmData(900, 1500);
+			$this->setShmData(512, true);
+			
 			$this->getRwSem()->unlock();
 			return $this;
-		
+
 		} catch (\Exception $e) {
 			$this->getRwSem()->unlock();
 			throw $e;
@@ -98,32 +137,34 @@ class Share extends Base
 	}
 	public function remove($key)
 	{
-		$this->getRwSem()->lock();
-		try {
-			
-			$keyId	= $this->getKeyId($key, false);
-			if ($keyId !== null) {
+		if (in_array($key, $this->_sysKeys) === false) {
+			$this->getRwSem()->lock();
+			try {
 				
-				$isValid	= shm_remove_var($this->getRwShm(), $keyId);
-				if ($isValid === false) {
-					throw new \Exception("Failed to remove Key: " . $key);
+				$keyId	= $this->getKeyId($key, false);
+				if ($keyId !== null) {
+					
+					$isValid	= shm_remove_var($this->getRwShm(), $keyId);
+					if ($isValid === false) {
+						throw new \Exception("Failed to remove Key: " . $key);
+					}
+					
+					//update maps
+					$maps		= $this->getMaps();
+					unset($maps[$key]);
+					$this->setShmData(514, $maps);
 				}
 				
-				//update maps
-				$maps		= $this->getMaps();
-				unset($maps[$key]);
-				$this->setShmData(514, $maps);
-
 				$this->getRwSem()->unlock();
 				return $this;
-				
-			} else {
-				throw new \Exception("Failed to remove key does not exist: " . $key);
+
+			} catch (\Exception $e) {
+				$this->getRwSem()->unlock();
+				throw $e;
 			}
 			
-		} catch (\Exception $e) {
-			$this->getRwSem()->unlock();
-			throw $e;
+		} else {
+			throw new \Exception("Cannot remove. Key is used by system: " . $key);
 		}
 	}
 	public function getAttachCount()
@@ -270,24 +311,16 @@ class Share extends Base
 				$this->getAttachSem()->unlock(true);
 				
 				if ($this->getKeepAlive() === false) {
-					//if we are the last process attached to the segment we clean up
-					$this->getAttachSem()->lock();
-					try {
+					
+					if ($this->getParent()->getShareExistByName($this->getName()) === true) {
+						//remove queue, you can use $this->getAttachCount() === 1
+						//to determine if you wanna destroy with others attached
+						$this->getAttachSem()->lock();
+						shm_remove($this->getRwShm());
 						
-						if ($this->getAttachCount() === 1) {
-							shm_remove($this->getRwShm());
-							
-							//remove the semaphores
-							$this->getRwSem()->setKeepAlive(false)->terminate();
-							$this->getAttachSem()->setKeepAlive(false)->terminate();
-							
-						} else {
-							$this->getAttachSem()->unlock();
-						}
-
-					} catch (\Exception $e) {
-						$this->getAttachSem()->unlock();
-						//dont throw, may be shutting down
+						//remove the semaphores
+						$this->getRwSem()->setKeepAlive(false)->terminate();
+						$this->getAttachSem()->setKeepAlive(false)->terminate();
 					}
 				}
 				shm_detach($this->getRwShm());
