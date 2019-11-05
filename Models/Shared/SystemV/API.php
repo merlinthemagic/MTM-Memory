@@ -35,7 +35,6 @@ class API
 			$shObj->initialize();
 			$hash					= hash("sha256", $name);
 			$this->_shObjs[$hash]	= $shObj;
-
 		}
 		return $shObj;
 	}

@@ -16,8 +16,9 @@ class Share extends Base
 	protected $_rwShm=null;
 	protected $_rwSem=null;
 	protected $_attachSem=null;
-	protected $_sysKeys=array("isInit", "maps", "mapId"); //mappings used by the system, maybe use int?
-	
+	protected $_sysKeys=array("shIsInit" => 512, "shCount" => 513, "shMaps" => 514, "shName" => 515, "shMapId" => 900); //mappings used by the system, maybe use int?
+	protected $_externalRwLock=false;
+
 	public function __construct($segId=null)
 	{
 		$this->setSegmentId($segId);
@@ -27,13 +28,21 @@ class Share extends Base
 	{
 		$this->terminate();
 	}
+	public function isInit()
+	{
+		return $this->_isInit;
+	}
+	public function isTerm()
+	{
+		return $this->_isTerm;
+	}
 	public function add($key, $value)
 	{
 		$this->getRwSem()->lock();
 		try {
 
 			if ($this->getExists($key) === false) {
-				if (in_array($key, $this->_sysKeys) === false) {
+				if (array_key_exists($key, $this->_sysKeys) === false) {
 					$uId		= $this->getShmData(900);
 					$this->setShmData($uId, $value); //set new variable
 					
@@ -70,11 +79,17 @@ class Share extends Base
 			return false;
 		}
 	}
-	public function get($key)
+	public function get($key, $throw=true)
 	{
 		$this->getRwSem()->lock();
 		try {
-			$data = $this->getShmData($this->getKeyId($key));
+			
+			$keyId	= $this->getKeyId($key, $throw);
+			if ($keyId !== null) {
+				$data	= $this->getShmData($this->getKeyId($key));
+			} else {
+				$data	= null; //key does not exist and we are not throwing
+			}
 			$this->getRwSem()->unlock();
 			return $data;
 		} catch (\Exception $e) {
@@ -84,7 +99,7 @@ class Share extends Base
 	}
 	public function set($key, $value)
 	{
-		if (in_array($key, $this->_sysKeys) === false) {
+		if (array_key_exists($key, $this->_sysKeys) === false) {
 			
 			$this->getRwSem()->lock();
 			try {
@@ -117,13 +132,10 @@ class Share extends Base
 					$this->remove($key);
 				}
 			}
+
 			//clear all data from share
-			$maps	= array(
-					"isInit"	=> 512,
-					"maps"		=> 514,
-					"mapId"		=> 900
-			);
-			$this->setShmData(514, $maps);
+			$this->setShmData(515, $this->getName());
+			$this->setShmData(514, $this->_sysKeys);
 			$this->setShmData(900, 1500);
 			$this->setShmData(512, true);
 			
@@ -137,7 +149,7 @@ class Share extends Base
 	}
 	public function remove($key)
 	{
-		if (in_array($key, $this->_sysKeys) === false) {
+		if (array_key_exists($key, $this->_sysKeys) === false) {
 			$this->getRwSem()->lock();
 			try {
 				
@@ -169,7 +181,7 @@ class Share extends Base
 	}
 	public function getAttachCount()
 	{
-		return $this->getParent()->getShareAttachCount($this);
+		return $this->get("shCount");
 	}
 	protected function getShmData($id)
 	{
@@ -204,7 +216,12 @@ class Share extends Base
 	}
 	protected function getMaps()
 	{
-		return $this->getShmData(514);
+		$maps	= $this->getShmData(514);
+		if (is_array($maps) === true) {
+			return $maps;
+		} else {
+			throw new \Exception("Maps is not an array");
+		}
 	}
 	protected function getKeyId($key, $throw=true)
 	{
@@ -225,13 +242,30 @@ class Share extends Base
 	{
 		return $this->_rwSem;
 	}
+	public function rwLock()
+	{
+		//allows the user to lock share for multiple operations
+		if ($this->_externalRwLock === false) {
+			$this->getRwSem()->lock();
+			$this->_externalRwLock	= true;
+		}
+		return $this;
+	}
+	public function rwUnlock()
+	{
+		if ($this->_externalRwLock === true) {
+			$this->getRwSem()->unlock();
+			$this->_externalRwLock	= false;
+		}
+		return $this;
+	}
 	protected function getRwShm()
 	{
 		return $this->_rwShm;
 	}
 	public function initialize()
 	{
-		if ($this->_isInit === false) {
+		if ($this->isInit() === false) {
 
 			if ($this->getSegmentId() !== null) {
 				
@@ -251,39 +285,33 @@ class Share extends Base
 						throw new \Exception("Failed to attach to shared segment");
 					}
 
-					if ($this->getRwSem()->lock(true) === true) {
-						
-						try {
+					$this->getRwSem()->lock();
+					try {
 
+						$isInit		= shm_has_var($this->getRwShm(), 512);
+						if ($isInit === false) {
+							
+							//memory is not yet structured, set fixed keys
 							$isInit		= shm_has_var($this->getRwShm(), 512);
 							if ($isInit === false) {
-								
-								//memory is not yet structured, set fixed keys
-								$isInit		= shm_has_var($this->getRwShm(), 512);
-								if ($isInit === false) {
-									//structure was not added while we waited for a lock
-									$maps	= array(
-											"isInit"	=> 512,
-											"maps"		=> 514,
-											"mapId"		=> 900 
-									);
-									$this->setShmData(514, $maps);
-									$this->setShmData(900, 1500); //user variables start at 1500
-									$this->setShmData(512, true);
-									
-								}
+								//structure was not added while we waited for a lock
+								$this->setShmData(514, $this->_sysKeys);
+								$this->setShmData(515, $this->getName());
+								$this->setShmData(513, 1);
+								$this->setShmData(900, 1500); //user variables start at 1500
+								$this->setShmData(512, true);
 							}
-							$this->getRwSem()->unlock();
-
-						} catch (\Exception $e) {
-							$this->getRwSem()->unlock();
-							throw $e;
+						} else {
+							$this->setShmData(513, ($this->getShmData(513) + 1));
 						}
-					} else {
-						//someone else has the lock, they will be setting up the structure
-						//and release the lock when ready.
-						//we deadlock if we wait for the lock for unknown reasons
+							
+						$this->getRwSem()->unlock();
+
+					} catch (\Exception $e) {
+						$this->getRwSem()->unlock();
+						throw $e;
 					}
+
 					$this->_initTime	= \MTM\Utilities\Factories::getTime()->getMicroEpoch();
 					$this->_isInit		= true;
 					
@@ -302,28 +330,34 @@ class Share extends Base
 	}
 	public function terminate()
 	{
-		if ($this->_isTerm === false) {
+		if ($this->isTerm() === false) {
 			$this->_isTerm	= true;
 
-			if ($this->_isInit === true) {
+			if ($this->isInit() === true) {
 				
-				$this->getRwSem()->unlock(true);
-				$this->getAttachSem()->unlock(true);
-				
-				if ($this->getKeepAlive() === false) {
+				if ($this->getParent()->getShareExistByName($this->getName()) === true) {
+
+					$this->setShmData(513, ($this->getShmData(513) - 1));
 					
-					if ($this->getParent()->getShareExistByName($this->getName()) === true) {
-						//remove queue, you can use $this->getAttachCount() === 1
-						//to determine if you wanna destroy with others attached
-						$this->getAttachSem()->lock();
-						shm_remove($this->getRwShm());
+					$this->getRwSem()->unlock(true);
+					$this->getAttachSem()->unlock(true);
+					
+					if ($this->getKeepAlive() === false) {
 						
-						//remove the semaphores
-						$this->getRwSem()->setKeepAlive(false)->terminate();
-						$this->getAttachSem()->setKeepAlive(false)->terminate();
+						if ($this->getParent()->getShareExistByName($this->getName()) === true) {
+							//remove queue, you can use $this->getAttachCount() === 1
+							//to determine if you wanna destroy with others attached
+							$this->getAttachSem()->lock();
+							shm_remove($this->getRwShm());
+							
+							//remove the semaphores
+							$this->getRwSem()->setKeepAlive(false)->terminate();
+							$this->getAttachSem()->setKeepAlive(false)->terminate();
+						}
 					}
+					shm_detach($this->getRwShm());
+				
 				}
-				shm_detach($this->getRwShm());
 				$this->_rwShm	= null;
 			}
 			
