@@ -9,38 +9,15 @@ class API
 	
 	public function getNewSemaphore($name=null, $count=null, $perm=null)
 	{
-		if ($name === null) {
-			$name	= \MTM\Utilities\Factories::getGuids()->getV4()->get(false);
-		} else {
-			$name	= trim($name);
-		}
-
 		$semObj	= $this->getByName($name, false);
 		if ($semObj === null) {
 			
 			//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
 			//attached count, because the max id can be 64bit/2
-			$segId		= $this->getSegmentIdFromName($name);
-			$rObj		= new \MTM\Memory\Models\Semaphore\SystemV\Semaphore($segId);
-			$rObj->setParent($this)->setName($name)->setKeepAlive($this->getDefaultKeepAlive());
-			
-			if ($count !== null) {
-				$rObj->setCount($count);
-			}
-			if ($perm !== null) {
-				$perm	= str_repeat("0", 4 - strlen($perm)) . $perm;
-				$rObj->setPermission($perm);
-			}
-
-			$rObj->initialize();
-			$hash					= hash("sha256", $name);
-			$this->_semObjs[$hash]	= $rObj;
-
-			return $rObj;
-			
-		} else {
-			throw new \Exception("Cannot add semaphore exists with name: " . $name);
+			$semObj		= new \MTM\Memory\Models\Semaphore\SystemV\Semaphore($name, $count, $perm);
+			$this->_semObjs[hash("sha256", $name)]	= $semObj->initialize();
 		}
+		return $semObj;
 	}
 	public function remove($semObj)
 	{
@@ -106,7 +83,7 @@ class API
 // 			ipcrm -s $i
 // 		done
 	}
-	protected function getSegmentIdFromName($name)
+	public function getSegmentIdFromName($name)
 	{
 		//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
 		//attached count, because the max id can be 64bit/2

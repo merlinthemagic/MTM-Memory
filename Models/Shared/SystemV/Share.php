@@ -5,28 +5,49 @@ namespace MTM\Memory\Models\Shared\SystemV;
 class Share extends Base
 {
 	protected $_guid=null;
+	protected $_segId=null;
 	protected $_isInit=false;
 	protected $_isTerm=false;
 	protected $_initTime=null;
 	protected $_name=null;
-	protected $_keepAlive=true;
-	protected $_segId=null;
-	protected $_size=10000;
-	protected $_perm="0644";
+	protected $_size=null;
+	protected $_perm=null;
 	protected $_rwShm=null;
 	protected $_rwSem=null;
 	protected $_attachSem=null;
+	protected $_keepAlive=null;
 	protected $_sysKeys=array("shIsInit" => 512, "shCount" => 513, "shMaps" => 514, "shName" => 515, "shMapId" => 900); //mappings used by the system, maybe use int?
-	protected $_externalRwLock=false;
 
-	public function __construct($segId=null)
+	public function __construct($name=null, $size=null, $perm=null)
 	{
-		$this->setSegmentId($segId);
-		$this->_guid	= \MTM\Utilities\Factories::getGuids()->getV4()->get(false);
+		$this->_guid		= \MTM\Utilities\Factories::getGuids()->getV4()->get(false);
+		$this->_name		= $name;
+		$this->_size		= $size;
+		$this->_perm		= $perm;
+		if ($this->_name === null) {
+			$this->_name	= \MTM\Utilities\Factories::getGuids()->getV4()->get(false);
+		}
+		if ($this->_size === null) {
+			$this->_size	= 10000;
+		}
+		if ($this->_perm === null) {
+			$this->_perm	= "0644";
+		} else {
+			$this->_perm	= str_repeat("0", 4 - strlen($this->_perm)) . $this->_perm;
+		}
+		$this->_parentObj	= \MTM\Memory\Factories::getShared()->getSystemFive();
+		$this->_segId		= $shmId			= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($this->_name, 4294967295);
+		$this->_keepAlive	= $this->_parentObj->getDefaultKeepAlive();
+		
+		$this->initialize();
 	}
 	public function __destruct()
 	{
 		$this->terminate();
+	}
+	public function getGuid()
+	{
+		return $this->_guid;
 	}
 	public function isInit()
 	{
@@ -35,6 +56,42 @@ class Share extends Base
 	public function isTerm()
 	{
 		return $this->_isTerm;
+	}
+	public function getGuid()
+	{
+		return $this->_guid;
+	}
+	public function getName()
+	{
+		return $this->_name;
+	}
+	public function getPermission()
+	{
+		return $this->_perm;
+	}
+	public function getSize()
+	{
+		return $this->_size;
+	}
+	public function getSegmentId()
+	{
+		return $this->_segId;
+	}
+	public function setKeepAlive($bool)
+	{
+		//remove the share on terminate if we are the last connection
+		$this->_keepAlive	= $bool;
+		if ($this->getAttachSem() !== null) {
+			$this->getAttachSem()->setKeepAlive($bool);
+		}
+		if ($this->getRwSem() !== null) {
+			$this->getRwSem()->setKeepAlive($bool);
+		}
+		return $this;
+	}
+	public function getKeepAlive()
+	{
+		return $this->_keepAlive;
 	}
 	public function add($key, $value)
 	{
@@ -244,19 +301,14 @@ class Share extends Base
 	}
 	public function rwLock()
 	{
-		//allows the user to lock share for multiple operations
-		if ($this->_externalRwLock === false) {
-			$this->getRwSem()->lock();
-			$this->_externalRwLock	= true;
-		}
+		//keep in mind the semaphore keeps track of lock count
+		//make sure to unlock after use
+		$this->getRwSem()->lock();
 		return $this;
 	}
 	public function rwUnlock()
 	{
-		if ($this->_externalRwLock === true) {
-			$this->getRwSem()->unlock();
-			$this->_externalRwLock	= false;
-		}
+		$this->getRwSem()->unlock();
 		return $this;
 	}
 	protected function getRwShm()
@@ -271,13 +323,13 @@ class Share extends Base
 				
 				$semFact			= \MTM\Memory\Factories::getSemaphores()->getSystemFive();
 				$this->_attachSem	= $semFact->getNewSemaphore($this->getName() . "-Attach", 1, $this->getPermission());
-				$this->_attachSem->setKeepAlive(true);
+				$this->_attachSem->setKeepAlive($this->getKeepAlive());
 				$this->getAttachSem()->lock();
 				
 				try {
 
 					$this->_rwSem	= $semFact->getNewSemaphore($this->getName() . "-RW", 1, $this->getPermission());
-					$this->_rwSem->setKeepAlive(true);
+					$this->_rwSem->setKeepAlive($this->getKeepAlive());
 					$rwShm			= shm_attach($this->getSegmentId(), $this->getSize(),intval($this->getPermission(), 8));
 					if (is_resource($rwShm) === true) {
 						$this->_rwShm		= $rwShm;
@@ -334,84 +386,25 @@ class Share extends Base
 			$this->_isTerm	= true;
 
 			if ($this->isInit() === true) {
+				$this->setShmData(513, ($this->getShmData(513) - 1));
+				$this->getRwSem()->unlock(true);
+				$this->getAttachSem()->unlock(true);
 				
-				if ($this->getParent()->getShareExistByName($this->getName()) === true) {
-
-					$this->setShmData(513, ($this->getShmData(513) - 1));
+				if ($this->getKeepAlive() === false) {
+					//remove queue, you can use $this->getAttachCount() === 1
+					//to determine if you wanna destroy with others attached
+					$this->getAttachSem()->lock();
+					shm_remove($this->getRwShm());
 					
-					$this->getRwSem()->unlock(true);
-					$this->getAttachSem()->unlock(true);
-					
-					if ($this->getKeepAlive() === false) {
-						
-						if ($this->getParent()->getShareExistByName($this->getName()) === true) {
-							//remove queue, you can use $this->getAttachCount() === 1
-							//to determine if you wanna destroy with others attached
-							$this->getAttachSem()->lock();
-							shm_remove($this->getRwShm());
-							
-							//remove the semaphores
-							$this->getRwSem()->setKeepAlive(false)->terminate();
-							$this->getAttachSem()->setKeepAlive(false)->terminate();
-						}
-					}
-					shm_detach($this->getRwShm());
-				
+					//remove the semaphores
+					$this->getRwSem()->setKeepAlive(false)->terminate();
+					$this->getAttachSem()->setKeepAlive(false)->terminate();
 				}
+				shm_detach($this->getRwShm());
 				$this->_rwShm	= null;
 			}
 			
 			$this->getParent()->removeShare($this);
 		}
-	}
-	public function getGuid()
-	{
-		return $this->_guid;
-	}
-	public function setName($name)
-	{
-		$this->_name	= $name;
-		return $this;
-	}
-	public function getName()
-	{
-		return $this->_name;
-	}
-	public function setPermission($str)
-	{
-		$this->_perm	= $str;
-		return $this;
-	}
-	public function getPermission()
-	{
-		return $this->_perm;
-	}
-	public function setSize($bytes)
-	{
-		$this->_size	= $bytes;
-		return $this;
-	}
-	public function getSize()
-	{
-		return $this->_size;
-	}
-	public function setSegmentId($id)
-	{
-		$this->_segId	= $id;
-		return $this;
-	}
-	public function getSegmentId()
-	{
-		return $this->_segId;
-	}
-	public function setKeepAlive($bool)
-	{
-		//remove the share on terminate if we are the last connection
-		$this->_keepAlive	= $bool;
-		return $this;
-	}
-	public function getKeepAlive()
-	{
-		return $this->_keepAlive;
 	}
 }

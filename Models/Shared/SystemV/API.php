@@ -9,34 +9,15 @@ class API
 	
 	public function getShare($name=null, $size=null, $perm=null)
 	{
-		if ($name === null) {
-			$name	= \MTM\Utilities\Factories::getGuids()->getV4()->get(false);
-		} else {
-			$name	= trim($name);
-		}
-
-		$shObj	= $this->getShareByName($name, false);
-		if ($shObj === null) {
-			
-			$segId		= $this->getSegmentIdFromName($name);
-			$shObj		= new \MTM\Memory\Models\Shared\SystemV\Share($segId);
-			$shObj->setParent($this)->setName($name)->setKeepAlive($this->getDefaultKeepAlive());
-
-			if ($size !== null) {
-				//make check if size does not match
-				$shObj->setSize($size);
-			}
-			if ($perm !== null) {
-				//make check if permissions do not match
-				$perm	= str_repeat("0", 4 - strlen($perm)) . $perm;
-				$shObj->setPermission($perm);
-			}
-
-			$shObj->initialize();
-			$hash					= hash("sha256", $name);
-			$this->_shObjs[$hash]	= $shObj;
-		}
-		return $shObj;
+		$rObj								= new \MTM\Memory\Models\Shared\SystemV\Share($name, $size, $perm);
+		$this->_shObjs[$rObj->getGuid()]	= $rObj;
+		return $rObj;
+	}
+	public function getThirdRW($name=null, $size=null, $perm=null)
+	{
+		$rObj								= new \MTM\Memory\Models\Shared\SystemV\ThirdRW($name, $size, $perm);
+		$this->_shObjs[$rObj->getGuid()]	= $rObj;
+		return $rObj;
 	}
 	public function setDefaultKeepAlive($bool)
 	{
@@ -50,28 +31,17 @@ class API
 	}
 	public function removeShare($shareObj)
 	{
-		$hash	= hash("sha256", $shareObj->getName());
-		if (array_key_exists($hash, $this->_shObjs) === true) {
-			unset($this->_shObjs[$hash]);
+		if (array_key_exists($shareObj->getGuid(), $this->_shObjs) === true) {
+			unset($this->_shObjs[$shareObj->getGuid()]);
 			$shareObj->terminate();
 		}
 		return $this;
 	}
-	public function getShareByName($name, $throw=false)
-	{
-		$hash	= hash("sha256", $name);
-		if (array_key_exists($hash, $this->_shObjs) === true) {
-			return $this->_shObjs[$hash];
-		} elseif ($throw === true) {
-			throw new \Exception("No share with name: " . $name);
-		} else {
-			return null;
-		}
-	}
 	public function getShareExistByName($name)
 	{
 		//does the share exist?
-		$segId	= $this->getSegmentIdFromName($name);
+		
+		$segId	= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
 		$strCmd	= "ipcs -m | grep \"" . dechex($segId) . "\" | awk '{print \$NF} END { if (!NR) print -1 }'";
 		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
 		if (intval($rObj->data) < 0) {
@@ -83,7 +53,8 @@ class API
 	public function getShareAttachCount($shareObj)
 	{
 		//how many processes are attached to the share?
-		$strCmd	= "ipcs -m | grep \"" . dechex($shareObj->getSegmentId()) . "\" | awk '{print \$NF} END { if (!NR) print 0 }'";
+		$segId	= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($shareObj->getName(), 4294967295);
+		$strCmd	= "ipcs -m | grep \"" . dechex($segId) . "\" | awk '{print \$NF} END { if (!NR) print 0 }'";
 		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
 		return intval($rObj->data);
 	}
@@ -108,11 +79,5 @@ class API
 // 				echo "ipcrm -m $i"
 // 				ipcrm -m $i
 // 			done
-	}
-	protected function getSegmentIdFromName($name)
-	{
-		//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
-		//attached count, because the max id can be 64bit/2 
-		return \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
 	}
 }
