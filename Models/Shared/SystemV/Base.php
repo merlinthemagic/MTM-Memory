@@ -13,8 +13,13 @@ abstract class Base
 	protected $_shmRes=null;
 	protected $_parentObj=null;
 	
+	protected $_defHash=null;
+	protected $_nextHash=null;
+	protected $_connHash=null;
+	protected $_mapsHash=null;
+	
 	//stay way elow _mapsId for custom Ids, as we allocate ids incrementally below that value
-	protected $_mapsId=7654321; //Id that holds key maps
+	protected $_mapsId=7451191; //Id that holds key maps
 
 	public function __construct($name=null, $size=null, $perm=null)
 	{
@@ -40,11 +45,45 @@ abstract class Base
 		} else {
 			$this->_perm	= str_repeat("0", 4 - strlen($this->_perm)) . $this->_perm;
 		}
+		$this->_defHash			= hash("sha256", null);
+		$this->_nextHash		= hash("sha256", "nextId" . $this->getName());
+		$this->_connHash		= hash("sha256", "connId" . $this->getName());
+		$this->_mapsHash		= hash("sha256", "mapsId" . $this->getName());
 		$this->initialize();
+		
+		if (is_numeric($this->getConnectionCount()) === false) {
+			echo "\n <code><pre> \nClass:  ".get_class($this)." \nMethod:  ".__FUNCTION__. "  \n";
+			var_dump($this->getConnectionCount());
+			echo "\n 2222 \n";
+			print_r($this->_connHash);
+			echo "\n 3333 \n";
+			print_r($this->getMaps()[$this->_connHash]);
+			echo "\n 3333 \n";
+			print_r($this);
+			echo "\n ".time()."</pre></code> \n ";
+			die("end");
+			file_put_contents("/dev/shm/merlin.txt", "Sitting here: " . print_r($this->getConnectionCount(), true) . "\n", FILE_APPEND);
+		}
+		
+		$this->rwLock();
+		$this->write($this->getMaps()[$this->_connHash], ($this->getConnectionCount() + 1));
+		$this->rwUnlock();
 	}
 	public function __destruct()
 	{
-		$this->terminate(); //must be implemented by child, need interface
+		$this->terminate();
+	}
+	protected function terminate()
+	{
+		if ($this->isTerm() === false) {
+			if ($this->isInit() === true) {
+				$this->rwLock();
+				$this->write($this->getMaps()[$this->_connHash], ($this->getConnectionCount() - 1));
+				$this->rwUnlock();
+			}
+			$this->_isTerm	= true;
+			$this->getParent()->removeShare($this);
+		}
 	}
 	public function getGuid()
 	{
@@ -74,52 +113,6 @@ abstract class Base
 	{
 		return $this->_parentObj;
 	}
-	public function writeLock()
-	{
-		$this->rwLock();
-		return $this;
-	}
-	public function writeUnlock()
-	{
-		$this->rwUnlock();
-		return $this;
-	}
-	public function write($id, $value)
-	{
-		if ($this->isTerm() === false) {
-			$this->writeLock();
-			$success	= shm_put_var($this->_shmRes, $id, $value);
-			$this->writeUnlock();
-			if ($success === true) {
-				return $this;
-			} else {
-				throw new \Exception("Failed to set id: " . $id);
-			}
-		} else {
-			throw new \Exception("Terminated, cannot write");
-		}
-	}
-	public function set($value, $key=null)
-	{
-		$this->writeLock();
-		try {
-
-			$hash	= hash("sha256", $key);
-			$maps	= shm_get_var($this->_shmRes, $this->_mapsId);
-			if (array_key_exists($hash, $maps) === false) {
-				$maps[$hash]	= $maps["nextId"];
-				$maps["nextId"]--;
-				$this->write($this->_mapsId, $maps);
-			}
-			$this->write($maps[$hash], $value);
-
-		} catch (\Exception $e) {
-			$this->writeUnlock();
-			throw $e;
-		}
-		$this->writeUnlock();
-		return $this;
-	}
 	public function readLock()
 	{
 		$this->roLock();
@@ -130,31 +123,46 @@ abstract class Base
 		$this->roUnlock();
 		return $this;
 	}
-	public function read($id)
+	public function writeLock()
 	{
-		if ($this->isTerm() === false) {
-			$this->readLock();
-			if (shm_has_var($this->_shmRes, $id) === true) {
-				$data	= @shm_get_var($this->_shmRes, $id);
-				$this->readUnlock();
-			} else {
-				$this->readUnlock();
-				throw new \Exception("Read failed. Id does not exist: " . $id);
+		$this->rwLock();
+		return $this;
+	}
+	public function writeUnlock()
+	{
+		$this->rwUnlock();
+		return $this;
+	}
+	public function set($value, $key=null)
+	{
+		$this->rwLock();
+		try {
+		
+			$hash	= hash("sha256", $key);
+			$maps	= $this->getMaps();
+			if (array_key_exists($hash, $maps) === false) {
+				$maps[$hash]	= $maps[$this->_nextHash];
+				$maps[$this->_nextHash]--;
+				$this->write($this->_mapsId, $maps);
 			}
-			return $data;
-		} else {
-			throw new \Exception("Terminated, cannot read");
+			$this->write($maps[$hash], $value);
+			
+		} catch (\Exception $e) {
+			$this->rwUnlock();
+			throw $e;
 		}
+		$this->rwUnlock();
+		return $this;
 	}
 	public function get($key=null, $throw=true)
 	{
 		if ($this->isTerm() === false) {
-			$this->readLock();
+			$this->roLock();
 			
 			try {
 				
 				$hash	= hash("sha256", $key);
-				$maps	= shm_get_var($this->_shmRes, $this->_mapsId);
+				$maps	= $this->getMaps();
 				if (array_key_exists($hash, $maps) === true) {
 					$data	= $this->read($maps[$hash]);
 				} elseif ($throw === true) {
@@ -162,22 +170,55 @@ abstract class Base
 				} else {
 					$data	= null;
 				}
-			
+				
 			} catch (\Exception $e) {
-				$this->readUnlock();
+				$this->roUnlock();
 				throw $e;
 			}
 			
-			$this->readUnlock();
+			$this->roUnlock();
 			return $data;
+			
 		} else {
 			throw new \Exception("Terminated, cannot get");
 		}
 	}
 	protected function setDefaults()
 	{
-		//null hash for default value
-		$this->write($this->_mapsId, array(hash("sha256", null) => ($this->_mapsId - 1), "nextId" => ($this->_mapsId - 2))); //set maps
-		$this->write(($this->_mapsId - 1), null); //set key for default value
+		$initId						= $this->_mapsId;;
+		$maps						= array();
+		$maps[$this->_mapsHash]		= $initId--;
+		$maps[$this->_defHash]		= $initId--;
+		$maps[$this->_connHash]		= $initId--;
+		
+		//next hash must be last, we will append after this one
+		$maps[$this->_nextHash]		= $initId--;
+		$this->write($maps[$this->_mapsHash], $maps); //set maps
+		$this->write($maps[$this->_defHash], null); //set key for default value
+		$this->write($maps[$this->_connHash], 0); //set connected threads/processes
+		return $this;
+	}
+	protected function getMaps()
+	{
+		//i read only, but i expect you to protect me
+		return $this->read($this->_mapsId);
+	}
+	protected function write($id, $value)
+	{
+		//i expect you to protect me
+		if (@shm_put_var($this->_shmRes, $id, $value) === true) {
+			return $this;
+		} else {
+			throw new \Exception("Failed to set id: " . $id);
+		}
+	}
+	protected function read($id)
+	{
+		//i expect you to protect me
+		if (@shm_has_var($this->_shmRes, $id) === true) {
+			return shm_get_var($this->_shmRes, $id);
+		} else {
+			throw new \Exception("Read failed. Id does not exist: " . $id);
+		}
 	}
 }

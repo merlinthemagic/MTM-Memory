@@ -26,13 +26,11 @@ class ThirdRW extends Base
 	protected $_roCtrlLocks=0;
 	protected $_rwCtrlLocks=0;
 
-	public function terminate()
+	protected function terminate()
 	{
 		if ($this->isTerm() === false) {
-			$this->_isTerm	= true;
-			
+			parent::terminate();
 			if ($this->isInit() === true) {
-				
 				if ($this->_roLocks > 0) {
 					$this->_roLocks	= 1;
 					$this->roUnlock();
@@ -42,16 +40,14 @@ class ThirdRW extends Base
 					$this->rwUnlock();
 				}
 			}
-			$this->getParent()->removeShare($this);
 		}
 	}
 	public function delete()
 	{
 		if ($this->isTerm() === false) {
 			if ($this->isInit() === true) {
-				
-				$this->rwLock();
-				$this->_isTerm	= true;
+
+				$this->terminate();
 				sem_remove($this->_queueRes);
 				sem_remove($this->_roCtrlRes);
 				
@@ -59,10 +55,24 @@ class ThirdRW extends Base
 				shmop_delete($this->_roRes);
 				sem_remove($this->_rwCtrlRes);
 			}
-			$this->getParent()->removeShare($this);
+
 		} else {
 			throw new \Exception("Cannot delete, share terminated");
 		}
+	}
+	public function getConnectionCount()
+	{
+		$gotLock	= false;
+		if ($this->_rwLocks === 0 && $this->_roLocks === 0) {
+			//we need some type of protection to do the read
+			$this->roLock();
+			$gotLock	= true;
+		}
+		$count	= $this->read($this->getMaps()[$this->_connHash]);
+		if ($gotLock === true) {
+			$this->roUnlock();
+		}
+		return $count;
 	}
 	protected function rwLock()
 	{
@@ -161,7 +171,7 @@ class ThirdRW extends Base
 			} else {
 				//this gets messy, technically we are safe to read, since we hold a write lock
 				//but we cannot control the order the locks are released. If the user releases
-				//the write lock before the read it ends n corruption, because a writer has free access
+				//the write lock before the read it ends in corruption, because a writer has free access
 				throw new \Exception("You cannot obtain a read lock while holding a write lock");
 			}
 		}

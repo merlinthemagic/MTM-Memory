@@ -33,7 +33,6 @@ class API
 	{
 		if (array_key_exists($shareObj->getGuid(), $this->_shObjs) === true) {
 			unset($this->_shObjs[$shareObj->getGuid()]);
-			$shareObj->terminate();
 		}
 		return $this;
 	}
