@@ -12,7 +12,6 @@ class Semaphore extends Base
 	protected $_isInit=false;
 	protected $_isTerm=false;
 	protected $_initTime=null;
-	protected $_keepAlive=true;
 	protected $_lockCount=0;
 	protected $_semRes=null;
 	
@@ -34,7 +33,6 @@ class Semaphore extends Base
 		}
 		$this->_guid		= \MTM\Utilities\Factories::getGuids()->getV4()->get(false);
 		$this->_parentObj	= \MTM\Memory\Factories::getSemaphores()->getSystemFive();
-		$this->_keepAlive	= $this->_parentObj->getDefaultKeepAlive();
 	}
 	public function __construct($id)
 	{
@@ -118,14 +116,17 @@ class Semaphore extends Base
 		if ($this->isTerm() === false) {
 			if ($this->isInit() === true) {
 				$this->unlock(true);
-				if ($this->getKeepAlive() === false) {
-					@sem_remove($this->getRes());
-				}
 				$this->_semRes	= null;
 			}
 			$this->_isTerm	= true;
 			$this->getParent()->remove($this);
 		}
+		return $this;
+	}
+	public function delete()
+	{
+		$this->getParent()->delete($this);
+		return $this;
 	}
 	public function getGuid()
 	{
@@ -142,17 +143,6 @@ class Semaphore extends Base
 	public function getPermission()
 	{
 		return $this->_perm;
-	}
-	public function setKeepAlive($bool)
-	{
-		//remove the resource on terminate if we are the last
-		//connected
-		$this->_keepAlive	= $bool;
-		return $this;
-	}
-	public function getKeepAlive()
-	{
-		return $this->_keepAlive;
 	}
 	protected function getRes()
 	{

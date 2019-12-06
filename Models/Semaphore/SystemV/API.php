@@ -4,8 +4,8 @@ namespace MTM\Memory\Models\Semaphore\SystemV;
 
 class API
 {
+	protected $_shellObj=null;
 	protected $_semObjs=array();
-	protected $_keepAlive=true;
 	
 	public function getNewSemaphore($name=null, $count=null, $perm=null)
 	{
@@ -28,6 +28,19 @@ class API
 		}
 		return $this;
 	}
+	public function delete($semObj)
+	{
+		if ($this->getExistByName($semObj->getName()) === true) {
+			$segId		= $this->getSegmentIdFromName($semObj->getName());
+			$semRes		= sem_get($segId);
+			$isValid	= sem_remove($semRes);
+			if ($isValid === false) {
+				throw new \Exception("Failed to delete semaphore: " . $semObj->getName());
+			}
+		}
+		$this->remove($semObj);
+		return $this;
+	}
 	public function getByName($name, $throw=false)
 	{
 		$hash	= hash("sha256", $name);
@@ -44,28 +57,19 @@ class API
 		//does the semaphore exist?
 		$segId	= $this->getSegmentIdFromName($name);
 		$strCmd	= "ipcs -s | grep \"" . dechex($segId) . "\" | awk '{print \$NF} END { if (!NR) print -1 }'";
-		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
+		$rObj	= $this->getShell()->write($strCmd)->read();
 		if (intval($rObj->data) < 0) {
 			return false;
 		} else {
 			return true;
 		}
 	}
-	public function setDefaultKeepAlive($bool)
-	{
-		//should new semaphores delete once terminated
-		$this->_keepAlive	= $bool;
-		return $this;
-	}
-	public function getDefaultKeepAlive()
-	{
-		return $this->_keepAlive;
-	}
+
 	public function clearSystem()
 	{
 		//remove all semaphores owned by this user on the system
 		$strCmd	= "ipcs -s | grep \$(whoami) | grep -E \"3\s+$\"; echo \" \""; //must be type "3"
-		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
+		$rObj	= $this->getShell()->write($strCmd)->read();
 		$lines	= explode("\n", trim($rObj->data));
 		foreach ($lines as $line) {
 			$id		= substr($line, 0, strpos($line, " "));
@@ -74,19 +78,20 @@ class API
 				@sem_remove($semRes);
 			}
 		}
-		return $this;
-		
-// 		#!/bin/sh
-// 		for i in $(ipcs -s | awk '{ print $2 }' | sed 1,2d);
-// 		do
-// 			echo "ipcrm -s $i"
-// 			ipcrm -s $i
-// 		done
+		return $this;					
 	}
 	public function getSegmentIdFromName($name)
 	{
 		//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
 		//attached count, because the max id can be 64bit/2
 		return \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
+	}
+	protected function getShell()
+	{
+		//cache in class to ensure its torn down after the API
+		if ($this->_shellObj === null) {
+			$this->_shellObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell();
+		}
+		return $this->_shellObj;
 	}
 }

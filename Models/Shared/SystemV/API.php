@@ -4,8 +4,8 @@ namespace MTM\Memory\Models\Shared\SystemV;
 
 class API
 {
+	protected $_shellObj=null;
 	protected $_shObjs=array();
-	protected $_keepAlive=true;
 	
 	public function getShare($name=null, $size=null, $perm=null)
 	{
@@ -19,30 +19,35 @@ class API
 		$this->_shObjs[$rObj->getGuid()]	= $rObj;
 		return $rObj;
 	}
-	public function setDefaultKeepAlive($bool)
+	public function getShares()
 	{
-		//should shares delete once terminated if there are no other connections
-		$this->_keepAlive	= $bool;
-		return $this;
-	}
-	public function getDefaultKeepAlive()
-	{
-		return $this->_keepAlive;
+		return array_values($this->_shObjs);
 	}
 	public function removeShare($shareObj)
 	{
 		if (array_key_exists($shareObj->getGuid(), $this->_shObjs) === true) {
 			unset($this->_shObjs[$shareObj->getGuid()]);
+			$shareObj->terminate();
+		}
+		return $this;
+	}
+	public function deleteShare($shareObj)
+	{	
+		$this->removeShare($shareObj);
+		$segId		= $this->getSegmentIdFromName($shareObj->getName());
+		$shRes		= shm_attach($segId);
+		$isValid	= shm_remove($shRes);
+		if ($isValid === false) {
+			throw new \Exception("Failed to delete share: " . $shareObj->getName());
 		}
 		return $this;
 	}
 	public function getShareExistByName($name)
 	{
 		//does the share exist?
-		
-		$segId	= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
+		$segId	= $this->getSegmentIdFromName($name);
 		$strCmd	= "ipcs -m | grep \"" . dechex($segId) . "\" | awk '{print \$NF} END { if (!NR) print -1 }'";
-		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
+		$rObj	= $this->getShell()->write($strCmd)->read();
 		if (intval($rObj->data) < 0) {
 			return false;
 		} else {
@@ -52,16 +57,16 @@ class API
 	public function getShareAttachCount($shareObj)
 	{
 		//how many processes are attached to the share?
-		$segId	= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($shareObj->getName(), 4294967295);
+		$segId	= $this->getSegmentIdFromName($name);
 		$strCmd	= "ipcs -m | grep \"" . dechex($segId) . "\" | awk '{print \$NF} END { if (!NR) print 0 }'";
-		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
+		$rObj	= $this->getShell()->write($strCmd)->read();
 		return intval($rObj->data);
 	}
 	public function clearSystem()
 	{
 		//remove all shares owned by this user on the system
 		$strCmd	= "ipcs -m | grep \$(whoami); echo \" \"";
-		$rObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell()->write($strCmd)->read();
+		$rObj	= $this->getShell()->write($strCmd)->read();
 		$lines	= explode("\n", trim($rObj->data));
 		foreach ($lines as $line) {
 			$id		= substr($line, 0, strpos($line, " "));
@@ -71,12 +76,19 @@ class API
 			}
 		}
 		return $this;
-		
-// 			#!/bin/sh
-// 			for i in $(ipcs -m | awk '{ print $2 }' | sed 1,2d);
-// 			do
-// 				echo "ipcrm -m $i"
-// 				ipcrm -m $i
-// 			done
+	}
+	public function getSegmentIdFromName($name)
+	{
+		//there seems to be a 32bit limit on the address space, if we do not limit we will not be able to find the share
+		//attached count, because the max id can be 64bit/2
+		return \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($name, 4294967295);
+	}
+	protected function getShell()
+	{
+		//cache in class to ensure its torn down after the API
+		if ($this->_shellObj === null) {
+			$this->_shellObj	= \MTM\Utilities\Factories::getSoftware()->getPhpTool()->getShell();
+		}
+		return $this->_shellObj;
 	}
 }

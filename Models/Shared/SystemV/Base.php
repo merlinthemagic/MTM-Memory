@@ -50,40 +50,20 @@ abstract class Base
 		$this->_connHash		= hash("sha256", "connId" . $this->getName());
 		$this->_mapsHash		= hash("sha256", "mapsId" . $this->getName());
 		$this->initialize();
-		
-		if (is_numeric($this->getConnectionCount()) === false) {
-			echo "\n <code><pre> \nClass:  ".get_class($this)." \nMethod:  ".__FUNCTION__. "  \n";
-			var_dump($this->getConnectionCount());
-			echo "\n 2222 \n";
-			print_r($this->_connHash);
-			echo "\n 3333 \n";
-			print_r($this->getMaps()[$this->_connHash]);
-			echo "\n 3333 \n";
-			print_r($this);
-			echo "\n ".time()."</pre></code> \n ";
-			die("end");
-			file_put_contents("/dev/shm/merlin.txt", "Sitting here: " . print_r($this->getConnectionCount(), true) . "\n", FILE_APPEND);
-		}
-		
-		$this->rwLock();
-		$this->write($this->getMaps()[$this->_connHash], ($this->getConnectionCount() + 1));
-		$this->rwUnlock();
 	}
 	public function __destruct()
 	{
 		$this->terminate();
 	}
-	protected function terminate()
+	public function terminate()
 	{
-		if ($this->isTerm() === false) {
-			if ($this->isInit() === true) {
-				$this->rwLock();
-				$this->write($this->getMaps()[$this->_connHash], ($this->getConnectionCount() - 1));
-				$this->rwUnlock();
-			}
-			$this->_isTerm	= true;
-			$this->getParent()->removeShare($this);
-		}
+		$this->getParent()->removeShare($this);
+		return $this;
+	}
+	public function delete()
+	{
+		$this->getParent()->deleteShare($this);
+		return $this;
 	}
 	public function getGuid()
 	{

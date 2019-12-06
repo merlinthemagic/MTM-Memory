@@ -26,40 +26,6 @@ class ThirdRW extends Base
 	protected $_roCtrlLocks=0;
 	protected $_rwCtrlLocks=0;
 
-	protected function terminate()
-	{
-		if ($this->isTerm() === false) {
-			parent::terminate();
-			if ($this->isInit() === true) {
-				if ($this->_roLocks > 0) {
-					$this->_roLocks	= 1;
-					$this->roUnlock();
-				}
-				if ($this->_rwLocks > 0) {
-					$this->_rwLocks	= 1;
-					$this->rwUnlock();
-				}
-			}
-		}
-	}
-	public function delete()
-	{
-		if ($this->isTerm() === false) {
-			if ($this->isInit() === true) {
-
-				$this->terminate();
-				sem_remove($this->_queueRes);
-				sem_remove($this->_roCtrlRes);
-				
-				shm_remove($this->_shmRes);
-				shmop_delete($this->_roRes);
-				sem_remove($this->_rwCtrlRes);
-			}
-
-		} else {
-			throw new \Exception("Cannot delete, share terminated");
-		}
-	}
 	public function getConnectionCount()
 	{
 		$gotLock	= false;
@@ -225,10 +191,10 @@ class ThirdRW extends Base
 	{
 		if ($this->isInit() === false) {
 
-			$defaults		= false;
-			$octPerm		= intval($this->getPermissions(), 8); //convert permissions
+			$defaults			= false;
+			$octPerm			= intval($this->getPermissions(), 8); //convert permissions
 			//generate the share Id dynamically from the name.
-			$shmId			= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($this->getName(), 4294967295);
+			$shmId				= $this->getParent()->getSegmentIdFromName($this->getName());
 			
 			//Shares
 			$this->_shmRes		= @shm_attach($shmId++, $this->getSize(), $octPerm); //The shared memory segment
@@ -283,8 +249,38 @@ class ThirdRW extends Base
 			if ($defaults === true) {
 				$this->setDefaults();
 			}
+
+			$this->write($this->getMaps()[$this->_connHash], ($this->getConnectionCount() + 1));
 			$this->rwUnlock();
 			$this->_isInit		= true;
+		}
+		return $this;
+	}
+	public function terminate()
+	{
+		if ($this->isTerm() === false) {
+			$this->_isTerm	= true;
+			if ($this->isInit() === true) {
+				if ($this->_roLocks > 0) {
+					$this->_roLocks	= 1;
+					$this->roUnlock();
+				}
+				$this->rwLock();
+				$this->write($this->getMaps()[$this->_connHash], ($this->getConnectionCount() - 1));
+				$this->rwUnlock();
+			}
+			parent::terminate();
+		}
+		return $this;
+	}
+	public function delete()
+	{
+		parent::delete();
+		if ($this->isInit() === true) {
+			shmop_delete($this->_roRes);
+			sem_remove($this->_queueRes);
+			sem_remove($this->_roCtrlRes);
+			sem_remove($this->_rwCtrlRes);
 		}
 		return $this;
 	}
@@ -293,7 +289,7 @@ class ThirdRW extends Base
 		if ($lock === true) {
 			if ($this->_queueLocks === 0) {
 				if (@sem_acquire($this->_queueRes, false) === false) {
-					throw new \Exception("Failed to obtain queue lock");
+					throw new \Exception("Failed to obtain queue sem lock");
 				}
 			}
 			$this->_queueLocks++;
@@ -301,7 +297,7 @@ class ThirdRW extends Base
 			if ($this->_queueLocks > 0) {
 				if ($this->_queueLocks === 1) {
 					if (@sem_release($this->_queueRes) === false) {
-						throw new \Exception("Failed to unlock queue");
+						throw new \Exception("Failed to unlock queue sem");
 					}
 				}
 				$this->_queueLocks--;

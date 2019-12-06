@@ -15,7 +15,6 @@ class Share extends Base
 	protected $_rwShm=null;
 	protected $_rwSem=null;
 	protected $_attachSem=null;
-	protected $_keepAlive=null;
 	protected $_sysKeys=array("shIsInit" => 512, "shCount" => 513, "shMaps" => 514, "shName" => 515, "shMapId" => 900); //mappings used by the system, maybe use int?
 
 	public function __construct($name=null, $size=null, $perm=null)
@@ -36,8 +35,7 @@ class Share extends Base
 			$this->_perm	= str_repeat("0", 4 - strlen($this->_perm)) . $this->_perm;
 		}
 		$this->_parentObj	= \MTM\Memory\Factories::getShared()->getSystemFive();
-		$this->_segId		= $shmId			= \MTM\Utilities\Factories::getStrings()->getHashing()->getAsInteger($this->_name, 4294967295);
-		$this->_keepAlive	= $this->_parentObj->getDefaultKeepAlive();
+		$this->_segId		= $this->getParent()->getSegmentIdFromName($this->_name);
 		
 		$this->initialize();
 	}
@@ -76,22 +74,6 @@ class Share extends Base
 	public function getSegmentId()
 	{
 		return $this->_segId;
-	}
-	public function setKeepAlive($bool)
-	{
-		//remove the share on terminate if we are the last connection
-		$this->_keepAlive	= $bool;
-		if ($this->getAttachSem() !== null) {
-			$this->getAttachSem()->setKeepAlive($bool);
-		}
-		if ($this->getRwSem() !== null) {
-			$this->getRwSem()->setKeepAlive($bool);
-		}
-		return $this;
-	}
-	public function getKeepAlive()
-	{
-		return $this->_keepAlive;
 	}
 	public function add($key, $value)
 	{
@@ -323,13 +305,11 @@ class Share extends Base
 				
 				$semFact			= \MTM\Memory\Factories::getSemaphores()->getSystemFive();
 				$this->_attachSem	= $semFact->getNewSemaphore($this->getName() . "-Attach", 1, $this->getPermission());
-				$this->_attachSem->setKeepAlive($this->getKeepAlive());
 				$this->getAttachSem()->lock();
 				
 				try {
 
 					$this->_rwSem	= $semFact->getNewSemaphore($this->getName() . "-RW", 1, $this->getPermission());
-					$this->_rwSem->setKeepAlive($this->getKeepAlive());
 					$rwShm			= shm_attach($this->getSegmentId(), $this->getSize(),intval($this->getPermission(), 8));
 					if (is_resource($rwShm) === true) {
 						$this->_rwShm		= $rwShm;
@@ -389,22 +369,20 @@ class Share extends Base
 				$this->setShmData(513, ($this->getShmData(513) - 1));
 				$this->getRwSem()->unlock(true);
 				$this->getAttachSem()->unlock(true);
-				
-				if ($this->getKeepAlive() === false) {
-					//remove queue, you can use $this->getAttachCount() === 1
-					//to determine if you wanna destroy with others attached
-					$this->getAttachSem()->lock();
-					shm_remove($this->getRwShm());
-					
-					//remove the semaphores
-					$this->getRwSem()->setKeepAlive(false)->terminate();
-					$this->getAttachSem()->setKeepAlive(false)->terminate();
-				}
 				shm_detach($this->getRwShm());
 				$this->_rwShm	= null;
 			}
-			
 			$this->getParent()->removeShare($this);
 		}
+		return $this;
+	}
+	public function delete()
+	{
+		$this->getParent()->deleteShare($this);
+		if ($this->isInit() === true) {
+			$this->getAttachSem()->delete();
+			$this->getRwSem()->delete();
+		}
+		return $this;
 	}
 }
